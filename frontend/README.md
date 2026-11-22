@@ -20,6 +20,10 @@ By default `npm run dev` expects the backend on `http://localhost:8000` (see
 `backend/README.md`). Override the proxy target with `API_PROXY_TARGET`, or set `VITE_MOCK=1`
 (see `.env.example`) to run the UI against a built-in demo proof with no backend at all.
 
+## Theme
+
+The UI always opens in dark mode (the OS colour scheme is ignored). The sun/moon switch at the bottom left of the chat history toggles light mode; the choice isn't persisted, so a reload returns to dark. Colours are CSS tokens in `src/routes/layout.css`: dark is the base `:root`, light is `:root[data-theme='light']`, and `src/lib/theme.svelte.ts` sets that attribute.
+
 ## Testing
 
 ```sh

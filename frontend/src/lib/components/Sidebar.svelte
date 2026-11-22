@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Chat } from '#lib/types.js';
+	import ThemeToggle from './ThemeToggle.svelte';
 
 	let {
 		chats,
@@ -75,4 +76,8 @@
 			{/each}
 		</ul>
 	</nav>
+
+	<div class="flex items-center border-t border-line px-4 py-3">
+		<ThemeToggle />
+	</div>
 </aside>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Chat, User } from '#lib/types.js';
+	import ThemeToggle from './ThemeToggle.svelte';
 
 	let {
 		chats,
@@ -92,5 +93,7 @@
 			<a href="/login" class="text-muted underline underline-offset-2 hover:text-ink">Sign in</a>
 			<span class="text-muted"> to keep your proofs</span>
 		{/if}
+	<div class="flex items-center border-t border-line px-4 py-3">
+		<ThemeToggle />
 	</div>
 </aside>

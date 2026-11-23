@@ -1,18 +1,22 @@
 <script lang="ts">
-	import type { Chat } from '#lib/types.js';
+	import type { Chat, User } from '#lib/types.js';
 
 	let {
 		chats,
 		activeId,
+		user = null,
 		onselect,
 		onnew,
-		oncollapse
+		oncollapse,
+		onlogout
 	}: {
 		chats: Chat[];
 		activeId: string | null;
+		user?: User | null;
 		onselect: (id: string) => void;
 		onnew: () => void;
 		oncollapse: () => void;
+		onlogout?: () => void;
 	} = $props();
 </script>
 
@@ -75,4 +79,18 @@
 			{/each}
 		</ul>
 	</nav>
+
+	<div class="border-t border-line px-4 py-3 text-sm">
+		{#if user}
+			<div class="flex items-center gap-2">
+				<span class="flex-1 truncate text-ink-2" title={user.email}>{user.email}</span>
+				<button type="button" onclick={onlogout} class="shrink-0 text-muted underline underline-offset-2 hover:text-ink">
+					Sign out
+				</button>
+			</div>
+		{:else}
+			<a href="/login" class="text-muted underline underline-offset-2 hover:text-ink">Sign in</a>
+			<span class="text-muted"> to keep your proofs</span>
+		{/if}
+	</div>
 </aside>

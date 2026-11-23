@@ -203,3 +203,9 @@ export interface SessionInfo {
 	expires_at: string;
 	created: boolean;
 }
+
+/** A signed-in account (`/api/auth/*`). */
+export interface User {
+	id: string;
+	email: string;
+}

@@ -16,7 +16,11 @@ import {
 	fromReply,
 	fromTurn,
 	getHistory,
+	getMe,
 	getProofGraph,
+	login,
+	logout,
+	signup,
 	streamChat,
 	toolSucceeded,
 	toolDiagnostic
@@ -891,5 +895,46 @@ describe('fromTurn', () => {
 	it('ignores reply when it just duplicates response (no explanation was ever stored)', () => {
 		const [, assistant] = fromTurn({ ...turn, reply: turn.response });
 		expect(assistant.steps[0].title).toBe('Lean proof');
+	});
+});
+
+describe('accounts', () => {
+	it('signs up and logs in with a JSON body and surfaces the backend detail on failure', async () => {
+		const fetcher = vi.fn()
+			.mockResolvedValueOnce(jsonResponse({ user: { id: 'u1', email: 'a@b.co' } }, 201))
+			.mockResolvedValueOnce(jsonResponse({ detail: 'An account with this email already exists' }, 409))
+			.mockResolvedValueOnce(jsonResponse({ detail: 'Invalid email or password' }, 401));
+		vi.stubGlobal('fetch', fetcher);
+		expect(await signup('a@b.co', 'password1')).toEqual({ id: 'u1', email: 'a@b.co' });
+		expect(fetcher.mock.calls[0][0]).toBe('/api/auth/signup');
+		expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'POST', credentials: 'include' });
+		expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ email: 'a@b.co', password: 'password1' });
+		await expect(signup('a@b.co', 'password1')).rejects.toMatchObject({ status: 409, message: 'An account with this email already exists' });
+		await expect(login('a@b.co', 'nope')).rejects.toMatchObject({ status: 401, message: 'Invalid email or password' });
+		expect(fetcher.mock.calls[2][0]).toBe('/api/auth/login');
+	});
+
+	it('reads the current user, null for a guest, and logs out', async () => {
+		const fetcher = vi.fn()
+			.mockResolvedValueOnce(jsonResponse({ user: null }))
+			.mockResolvedValueOnce(jsonResponse({ user: { id: 'u1', email: 'a@b.co' } }))
+			.mockResolvedValueOnce(new Response(null, { status: 204 }));
+		vi.stubGlobal('fetch', fetcher);
+		expect(await getMe()).toBeNull();
+		expect(await getMe()).toEqual({ id: 'u1', email: 'a@b.co' });
+		await logout();
+		expect(fetcher.mock.calls[2][0]).toBe('/api/auth/logout');
+	});
+
+	it('re-checks the session after the identity changes', async () => {
+		const fetcher = vi.fn()
+			.mockResolvedValueOnce(new Response(null, { status: 204 }))
+			.mockResolvedValueOnce(jsonResponse({ user: { id: 'u1', email: 'a@b.co' } }))
+			.mockResolvedValueOnce(new Response(null, { status: 204 }));
+		vi.stubGlobal('fetch', fetcher);
+		await ensureSession();
+		await login('a@b.co', 'password1');
+		await ensureSession();
+		expect(fetcher.mock.calls.map((c) => c[0])).toEqual(['/api/session', '/api/auth/login', '/api/session']);
 	});
 });

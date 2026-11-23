@@ -212,3 +212,46 @@ async def list_history(user_token: str, chat_id: str) -> list[dict[str, str]]:
         }
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Accounts (email + password). `email` is stored normalised by the caller.
+
+
+async def create_user(email: str, password_hash: str) -> dict[str, str] | None:
+    """Insert a user and return {user_id, email}, or None if the email is taken."""
+    async with await _connect() as conn:
+        cur = await conn.execute(
+            """
+            insert into users (email, password_hash) values (%s, %s)
+            on conflict (email) do nothing
+            returning user_id, email
+            """,
+            (email, password_hash),
+        )
+        row = await cur.fetchone()
+    if row is None:
+        return None
+    return {"user_id": _str(row["user_id"]), "email": row["email"]}
+
+
+async def get_user_by_email(email: str) -> dict[str, str] | None:
+    async with await _connect() as conn:
+        cur = await conn.execute(
+            "select user_id, email, password_hash from users where email = %s", (email,)
+        )
+        row = await cur.fetchone()
+    if row is None:
+        return None
+    return {**row, "user_id": _str(row["user_id"])}
+
+
+async def get_user(user_id: str) -> dict[str, str] | None:
+    async with await _connect() as conn:
+        cur = await conn.execute(
+            "select user_id, email from users where user_id = %s", (user_id,)
+        )
+        row = await cur.fetchone()
+    if row is None:
+        return None
+    return {"user_id": _str(row["user_id"]), "email": row["email"]}

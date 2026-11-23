@@ -31,3 +31,11 @@ create table if not exists proof_nodes (
 
 alter table proof_nodes add column if not exists kind text;
 alter table proof_nodes add column if not exists proof_dependency_ids text[];
+
+create table if not exists users (
+  user_id           uuid primary key default gen_random_uuid(),
+  email             text not null unique,
+  password_hash     text not null,
+  email_verified_at timestamptz,
+  created_at        timestamptz not null default now()
+);

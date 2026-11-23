@@ -9,14 +9,16 @@
 		ensureSession,
 		finalizeLive,
 		getHistory,
+		getMe,
 		isMockMode,
+		logout,
 		newChatId,
 		streamChat
 	} from '#lib/api.js';
 	import { toolLabel } from '#lib/format.js';
 	import { demoChats } from '#lib/mock.js';
 	import { composePrompt, extractProofText, FileError } from '#lib/extract.js';
-	import type { AssistantMessage, Chat, VerificationStatus } from '#lib/types.js';
+	import type { AssistantMessage, Chat, User, VerificationStatus } from '#lib/types.js';
 	import Brace from '#lib/components/Brace.svelte';
 	import Composer from '#lib/components/Composer.svelte';
 	import FileDrop from '#lib/components/FileDrop.svelte';
@@ -62,7 +64,26 @@
 	let fileText = $state<string | null>(null);
 	let reading = $state(false);
 
+	/** The signed-in account, or null for a guest (auth is optional). */
+	let user = $state<User | null>(null);
+
+	async function signOut() {
+		try {
+			await logout();
+		} catch (e) {
+			sessionError = e instanceof Error ? e.message : String(e);
+			return;
+		}
+		inFlight?.controller.abort();
+		user = null;
+		chats = [];
+		newChat();
+	}
+
 	onMount(() => {
+		getMe()
+			.then((u) => (user = u))
+			.catch(() => {});
 		if (isMockMode) return;
 		ensureSession().catch((e) => {
 			sessionError = e instanceof Error ? e.message : String(e);
@@ -372,6 +393,8 @@
 			<Sidebar
 				{chats}
 				{activeId}
+				{user}
+				onlogout={signOut}
 				onselect={openChat}
 				onnew={newChat}
 				oncollapse={() => (sidebarPinned = false)}
@@ -584,6 +607,8 @@
 				<Sidebar
 					{chats}
 					{activeId}
+					{user}
+					onlogout={signOut}
 					onselect={openChat}
 					onnew={newChat}
 					oncollapse={() => {

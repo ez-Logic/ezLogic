@@ -1,7 +1,30 @@
 @import 'tailwindcss';
 
-/* Design tokens. Light by default, dark via prefers-color-scheme. */
+/* Design tokens. Dark by default; <html data-theme="light"> switches to the light palette
+   (see src/lib/theme.svelte.ts). The OS colour scheme is deliberately ignored. */
 :root {
+	--c-paper: #141413;
+	--c-surface: #1d1d1b;
+	--c-sunken: #232320;
+	--c-ink: #eceae4;
+	--c-ink-2: #bdbab2;
+	--c-muted: #85827a;
+	--c-line: #33322e;
+	--c-line-strong: #4a4943;
+	--c-accent: #8b9bff;
+	--c-accent-soft: #23284a;
+	--c-ok: #5fcf95;
+	--c-ok-soft: #173326;
+	--c-warn: #e6b45c;
+	--c-warn-soft: #3a2e17;
+	--c-code-bg: #0f1013;
+	--c-code-ink: #d9dbe3;
+	--c-code-line: #1d1f25;
+	--c-code-hl: #232a4d;
+	color-scheme: dark;
+}
+
+:root[data-theme='light'] {
 	--c-paper: #f7f6f2;
 	--c-surface: #ffffff;
 	--c-sunken: #efeee9;
@@ -17,35 +40,10 @@
 	--c-warn: #9a6200;
 	--c-warn-soft: #fbefd9;
 	--c-code-bg: #1c1d22;
-	--c-code-ink: #d9dbe3;
 	--c-code-line: #2a2c34;
 	--c-code-hl: #2b3256;
 	color-scheme: light;
 }
-
-@media (prefers-color-scheme: dark) {
-	:root {
-		--c-paper: #141413;
-		--c-surface: #1d1d1b;
-		--c-sunken: #232320;
-		--c-ink: #eceae4;
-		--c-ink-2: #bdbab2;
-		--c-muted: #85827a;
-		--c-line: #33322e;
-		--c-line-strong: #4a4943;
-		--c-accent: #8b9bff;
-		--c-accent-soft: #23284a;
-		--c-ok: #5fcf95;
-		--c-ok-soft: #173326;
-		--c-warn: #e6b45c;
-		--c-warn-soft: #3a2e17;
-		--c-code-bg: #0f1013;
-		--c-code-line: #1d1f25;
-		--c-code-hl: #232a4d;
-		color-scheme: dark;
-	}
-}
-
 @theme inline {
 	--color-paper: var(--c-paper);
 	--color-surface: var(--c-surface);

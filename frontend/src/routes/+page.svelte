@@ -11,6 +11,7 @@
 		getHistory,
 		getMe,
 		isMockMode,
+		listChats,
 		logout,
 		newChatId,
 		streamChat
@@ -67,6 +68,31 @@
 	/** The signed-in account, or null for a guest (auth is optional). */
 	let user = $state<User | null>(null);
 
+	/** True until the signed-in user's chat list has loaded; the sidebar shows a skeleton. */
+	let chatsLoading = $state(!isMockMode);
+	/** Set when loading the chat list (GET /api/chats) fails. */
+	let chatsError = $state<string | null>(null);
+
+	/** Finds out who is signed in and loads their chats into the sidebar. Guests have no saved list. */
+	async function loadChats() {
+		chatsLoading = !isMockMode;
+		chatsError = null;
+		try {
+			const me = await getMe();
+			user = me;
+			if (!me || isMockMode) return;
+			const saved = await listChats();
+			if (user?.id !== me.id) return; // signed out while loading
+			// Keep any chat started while the list was loading.
+			const known = new Set(chats.map((c) => c.id));
+			chats.push(...saved.filter((c) => !known.has(c.id)));
+		} catch (e) {
+			chatsError = e instanceof Error ? e.message : String(e);
+		} finally {
+			chatsLoading = false;
+		}
+	}
+
 	async function signOut() {
 		try {
 			await logout();
@@ -77,13 +103,13 @@
 		inFlight?.controller.abort();
 		user = null;
 		chats = [];
+		chatsLoading = false;
+		chatsError = null;
 		newChat();
 	}
 
 	onMount(() => {
-		getMe()
-			.then((u) => (user = u))
-			.catch(() => {});
+		loadChats();
 		if (isMockMode) return;
 		ensureSession().catch((e) => {
 			sessionError = e instanceof Error ? e.message : String(e);
@@ -136,17 +162,25 @@
 		drawerOpen = false;
 	}
 
+	/** Chats whose history is being fetched, so a second click doesn't load it twice. */
+	const historyLoading = new Set<string>();
+
 	async function openChat(id: string) {
 		activeId = id;
 		selection = null;
 		drawerOpen = false;
 		historyError = null;
 		const chat = chats.find((c) => c.id === id);
-		if (!chat || chat.messages.length > 0 || isMockMode) return;
+		if (!chat || chat.messages.length > 0 || isMockMode || historyLoading.has(id)) return;
+		historyLoading.add(id);
 		try {
-			chat.messages = await getHistory(id);
+			const history = await getHistory(id);
+			// Anything sent while the history was loading goes after it.
+			chat.messages = [...history, ...chat.messages];
 		} catch (e) {
 			historyError = e instanceof Error ? e.message : String(e);
+		} finally {
+			historyLoading.delete(id);
 		}
 	}
 
@@ -394,6 +428,9 @@
 				{chats}
 				{activeId}
 				{user}
+				loading={chatsLoading}
+				error={chatsError}
+				onretry={loadChats}
 				onlogout={signOut}
 				onselect={openChat}
 				onnew={newChat}
@@ -608,6 +645,9 @@
 					{chats}
 					{activeId}
 					{user}
+					loading={chatsLoading}
+					error={chatsError}
+					onretry={loadChats}
 					onlogout={signOut}
 					onselect={openChat}
 					onnew={newChat}

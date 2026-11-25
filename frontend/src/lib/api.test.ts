@@ -18,6 +18,7 @@ import {
 	getHistory,
 	getMe,
 	getProofGraph,
+	listChats,
 	login,
 	logout,
 	signup,
@@ -895,6 +896,31 @@ describe('fromTurn', () => {
 	it('ignores reply when it just duplicates response (no explanation was ever stored)', () => {
 		const [, assistant] = fromTurn({ ...turn, reply: turn.response });
 		expect(assistant.steps[0].title).toBe('Lean proof');
+	});
+});
+
+describe('listChats', () => {
+	it('maps saved chats to sidebar entries with no messages, keeping the server order', async () => {
+		const row = (chat_id: string, title: string) => ({
+			chat_id,
+			title,
+			created_at: '2026-11-25T00:00:00+00:00',
+			updated_at: '2026-11-25T01:00:00+00:00'
+		});
+		const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse({ chats: [row('c2', 'Newer'), row('c1', 'Older')] }));
+		vi.stubGlobal('fetch', fetcher);
+		const updatedAt = Date.UTC(2026, 10, 25, 1);
+		expect(await listChats()).toEqual([
+			{ id: 'c2', title: 'Newer', messages: [], updatedAt },
+			{ id: 'c1', title: 'Older', messages: [], updatedAt }
+		]);
+		expect(fetcher.mock.calls[0][0]).toBe('/api/chats');
+		expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
+	});
+
+	it('surfaces the backend detail on failure', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({ detail: 'Database error: down' }, 503)));
+		await expect(listChats()).rejects.toMatchObject({ kind: 'http', status: 503, message: 'Database error: down' });
 	});
 });
 

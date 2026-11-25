@@ -97,6 +97,17 @@ class HistoryResponse(BaseModel):
     turns: list[HistoryTurn]
 
 
+class ChatSummary(BaseModel):
+    chat_id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class ChatsResponse(BaseModel):
+    chats: list[ChatSummary]
+
+
 class SnippetRequest(BaseModel):
     code: str
 
@@ -393,6 +404,7 @@ async def chat(body: ChatRequest, request: Request, session_response: Response):
                         user, chat_id, model, body.text,
                         envelope.encode(response, explanation), result.messages,
                         graph=graph,
+                        account_id=read_user_id(request),
                     )
                 log.info(
                     "chat done chat_id=%s finished=%s saved=%s tool_calls=%d elapsed=%.1fs",
@@ -461,6 +473,20 @@ async def build_proof_graph(query_id: UUID, request: Request):
     except (RuntimeError, psycopg.Error):
         log.exception("Graph database write failed")
         raise HTTPException(status_code=503, detail="Graph database is unavailable")
+
+
+@app.get("/api/chats", response_model=ChatsResponse)
+async def chats(request: Request):
+    """The signed-in user's chats, most recently used first. Empty for a guest."""
+    user_id = read_user_id(request)
+    if user_id is None:
+        return ChatsResponse(chats=[])
+    try:
+        rows = await db.list_chats(user_id)
+    except (RuntimeError, psycopg.Error) as e:
+        log.error("chats db error: %s", e)
+        raise HTTPException(status_code=503, detail=f"Database error: {e}")
+    return ChatsResponse(chats=[ChatSummary(**row) for row in rows])
 
 
 @app.get(

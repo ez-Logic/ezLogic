@@ -46,6 +46,7 @@ Tool calls are printed live as the agent runs them.
 | GET | `/health` | Health check |
 | POST | `/api/session` | Validate or issue the guest cookie. Returns `204 No Content` |
 | POST | `/api/chat` | Run the agent for one turn, streamed as SSE. Body: `{"chat_id": uuid, "text": str, "model": str?, "allowBuild": bool}`. See `database/README.md` for the event stream shape |
+| GET | `/api/chats` | The signed-in user's chats, most recently used first. Empty for a guest |
 | GET | `/api/history?chat_id=<uuid>` | Every stored turn for this guest and chat, oldest first |
 | GET | `/api/files` | List workspace files |
 | GET | `/api/files/{path}` | Read a workspace file |

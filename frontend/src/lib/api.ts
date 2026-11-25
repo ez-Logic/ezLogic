@@ -5,7 +5,9 @@ import type {
 	AgentDoneEvent,
 	AgentEvent,
 	AssistantMessage,
+	Chat,
 	ChatMessage,
+	ChatsResponse,
 	HistoryResponse,
 	HistoryTurn,
 	LeanToolResult,
@@ -357,6 +359,19 @@ export async function* streamChat(
 		if (opts.signal?.aborted) throw new ApiError('aborted', 'Request aborted');
 		throw new ApiError('protocol', 'Stream ended without a final event');
 	}
+}
+
+/** The signed-in user's chats, most recently used first (empty for a guest). Messages
+ * aren't included; `getHistory` loads them when a chat is opened. */
+export async function listChats(signal?: AbortSignal): Promise<Chat[]> {
+	if (isMockMode) return [];
+	const data = await fetchJson<ChatsResponse>('/api/chats', { signal });
+	return data.chats.map((c) => ({
+		id: c.chat_id,
+		title: c.title,
+		messages: [],
+		updatedAt: Date.parse(c.updated_at)
+	}));
 }
 
 export async function getHistory(chatId: string, signal?: AbortSignal): Promise<ChatMessage[]> {

@@ -82,8 +82,13 @@ async def insert_turn(
     response: str,
     messages: list[dict[str, Any]],
     graph: ProofGraph | None = None,
+    account_id: str | None = None,
 ) -> str:
-    """Store one build and return its query_id. Both inserts commit together."""
+    """Store one build and return its query_id. All inserts commit together.
+
+    `account_id` is the signed-in user's id, or None for a guest. Only a signed-in
+    user's chat gets a `chats` row.
+    """
     async with await _connect() as conn:
         # One transaction: a queries row is not kept without its chat_turns row.
         async with conn.transaction():
@@ -108,7 +113,50 @@ async def insert_turn(
                 """,
                 (user_token, chat_id, query_id),
             )
+            if account_id is not None:
+                await _touch_chat(conn, account_id, chat_id, query)
     return _str(query_id)
+
+
+CHAT_TITLE_MAX = 48
+
+
+def _chat_title(query: str) -> str:
+    """First non-empty line of the opening message, cut like the frontend's chat titles."""
+    title = next((line.strip() for line in query.splitlines() if line.strip()), "New proof")
+    return title if len(title) <= CHAT_TITLE_MAX else title[: CHAT_TITLE_MAX - 1] + "…"
+
+
+async def _touch_chat(conn, account_id: str, chat_id: str, query: str) -> None:
+    """Create the account's chat, or mark it as just used."""
+    # Selecting from users skips the row, instead of failing the whole turn, when the
+    # account was deleted but its cookie is still valid. The final `where` leaves a
+    # chat that belongs to someone else untouched.
+    await conn.execute(
+        """
+        insert into chats (chat_id, user_id, title)
+        select %s, user_id, %s from users where user_id = %s
+        on conflict (chat_id) do update set updated_at = now()
+        where chats.user_id = excluded.user_id
+        """,
+        (chat_id, _chat_title(query), account_id),
+    )
+
+
+async def list_chats(user_id: str) -> list[dict[str, str]]:
+    """The signed-in user's chats, most recently used first."""
+    async with await _connect() as conn:
+        cur = await conn.execute(
+            """
+            select chat_id, title, created_at, updated_at
+            from chats
+            where user_id = %s
+            order by updated_at desc
+            """,
+            (user_id,),
+        )
+        rows = await cur.fetchall()
+    return [{key: _str(value) for key, value in row.items()} for row in rows]
 
 
 async def _write_graph(conn, query_id: str | UUID, graph: ProofGraph) -> None:

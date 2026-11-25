@@ -197,9 +197,27 @@ export interface HistoryResponse {
 	turns: HistoryTurn[];
 }
 
+/** One row of `GET /api/chats`. */
+export interface ChatSummary {
+	chat_id: string;
+	title: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface ChatsResponse {
+	chats: ChatSummary[];
+}
+
 /** Assumed backend addition (B1): `POST /api/session` returning more than 204. */
 export interface SessionInfo {
 	guest_id: string;
 	expires_at: string;
 	created: boolean;
+}
+
+/** A signed-in account (`/api/auth/*`). */
+export interface User {
+	id: string;
+	email: string;
 }

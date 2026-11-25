@@ -12,13 +12,14 @@ import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from agent import AgentResult, ExplainerAgent, ProofAgent, Workspace, WorkspaceError
 from agent import envelope, lean
 from agent.graph import GraphResponse, extract_graph
 from config import Config
-from guest_session import ensure_guest_session
+from auth import clear_user_cookie, ensure_session, issue_user_cookie, read_user_id
+from passwords import DUMMY_HASH, hash_password, verify_password
 
 import db
 
@@ -96,6 +97,17 @@ class HistoryResponse(BaseModel):
     turns: list[HistoryTurn]
 
 
+class ChatSummary(BaseModel):
+    chat_id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class ChatsResponse(BaseModel):
+    chats: list[ChatSummary]
+
+
 class SnippetRequest(BaseModel):
     code: str
 
@@ -105,8 +117,8 @@ class FileRequest(BaseModel):
 
 
 def _user_id(request: Request) -> str:
-    """Guest id (JWT `sub`) set by ensure_guest_session."""
-    return request.state.guest_id
+    """Signed-in user id, else the guest id; set by auth.ensure_session."""
+    return request.state.user_token
 
 
 def _extract_lean(result: AgentResult, proof_workspace: Workspace) -> tuple[str | None, str | None]:
@@ -181,16 +193,98 @@ async def health_check():
     "/api/session",
     status_code=204,
     response_class=Response,
-    dependencies=[Depends(ensure_guest_session)],
+    dependencies=[Depends(ensure_session)],
 )
 async def start_guest_session() -> None:
     """Validate or issue the guest session cookie."""
 
 
+# ---------------------------------------------------------------------------
+# Email + password accounts (optional; guests keep working without one)
+
+PASSWORD_MIN, PASSWORD_MAX = 8, 256
+
+
+class Credentials(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+
+
+class AuthResponse(BaseModel):
+    user: UserOut | None
+
+
+def _normalise_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _user_out(row: dict) -> UserOut:
+    return UserOut(id=row["user_id"], email=row["email"])
+
+
+def _db_unavailable(e: Exception) -> HTTPException:
+    log.error("auth db error: %s", e)
+    return HTTPException(status_code=503, detail="Account database is unavailable")
+
+
+@app.post("/api/auth/signup", response_model=AuthResponse, status_code=201)
+async def signup(body: Credentials, response: Response):
+    if not PASSWORD_MIN <= len(body.password) <= PASSWORD_MAX:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Password must be {PASSWORD_MIN}-{PASSWORD_MAX} characters",
+        )
+    password_hash = await asyncio.to_thread(hash_password, body.password)
+    try:
+        user = await db.create_user(_normalise_email(body.email), password_hash)
+    except (RuntimeError, psycopg.Error) as e:
+        raise _db_unavailable(e)
+    if user is None:
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    issue_user_cookie(response, user["user_id"])
+    return AuthResponse(user=_user_out(user))
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def login(body: Credentials, response: Response):
+    try:
+        user = await db.get_user_by_email(_normalise_email(body.email))
+    except (RuntimeError, psycopg.Error) as e:
+        raise _db_unavailable(e)
+    stored = user["password_hash"] if user else DUMMY_HASH
+    ok = await asyncio.to_thread(verify_password, body.password[:PASSWORD_MAX], stored)
+    if user is None or not ok:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    issue_user_cookie(response, user["user_id"])
+    return AuthResponse(user=_user_out(user))
+
+
+@app.post("/api/auth/logout", status_code=204, response_class=Response)
+async def logout(response: Response) -> None:
+    clear_user_cookie(response)
+
+
+@app.get("/api/auth/me", response_model=AuthResponse)
+async def me(request: Request):
+    user_id = read_user_id(request)
+    if user_id is None:
+        return AuthResponse(user=None)
+    try:
+        user = await db.get_user(user_id)
+    except (RuntimeError, psycopg.Error) as e:
+        raise _db_unavailable(e)
+    return AuthResponse(user=_user_out(user) if user else None)
+
+
 @app.post(
     "/api/chat",
     response_class=StreamingResponse,
-    dependencies=[Depends(ensure_guest_session)],
+    dependencies=[Depends(ensure_session)],
 )
 async def chat(body: ChatRequest, request: Request, session_response: Response):
     """Run the proof agent for one user turn, streaming events as SSE.
@@ -310,6 +404,7 @@ async def chat(body: ChatRequest, request: Request, session_response: Response):
                         user, chat_id, model, body.text,
                         envelope.encode(response, explanation), result.messages,
                         graph=graph,
+                        account_id=read_user_id(request),
                     )
                 log.info(
                     "chat done chat_id=%s finished=%s saved=%s tool_calls=%d elapsed=%.1fs",
@@ -340,7 +435,7 @@ PROOF_UNAVAILABLE = "This saved proof is unavailable in your guest session. Run 
 
 
 @app.get("/api/queries/{query_id}/graph", response_model=GraphResponse | None,
-         dependencies=[Depends(ensure_guest_session)])
+         dependencies=[Depends(ensure_session)])
 async def proof_graph(query_id: UUID, request: Request):
     user = _user_id(request)
     key = str(query_id)
@@ -355,7 +450,7 @@ async def proof_graph(query_id: UUID, request: Request):
 
 
 @app.post("/api/queries/{query_id}/graph", response_model=GraphResponse,
-          dependencies=[Depends(ensure_guest_session)])
+          dependencies=[Depends(ensure_session)])
 async def build_proof_graph(query_id: UUID, request: Request):
     """Build or upgrade a declaration graph from the saved proof using Lean."""
     user = _user_id(request)
@@ -380,10 +475,24 @@ async def build_proof_graph(query_id: UUID, request: Request):
         raise HTTPException(status_code=503, detail="Graph database is unavailable")
 
 
+@app.get("/api/chats", response_model=ChatsResponse)
+async def chats(request: Request):
+    """The signed-in user's chats, most recently used first. Empty for a guest."""
+    user_id = read_user_id(request)
+    if user_id is None:
+        return ChatsResponse(chats=[])
+    try:
+        rows = await db.list_chats(user_id)
+    except (RuntimeError, psycopg.Error) as e:
+        log.error("chats db error: %s", e)
+        raise HTTPException(status_code=503, detail=f"Database error: {e}")
+    return ChatsResponse(chats=[ChatSummary(**row) for row in rows])
+
+
 @app.get(
     "/api/history",
     response_model=HistoryResponse,
-    dependencies=[Depends(ensure_guest_session)],
+    dependencies=[Depends(ensure_session)],
 )
 async def history(chat_id: UUID, request: Request):
     """Every stored turn for this guest and chat, oldest first."""

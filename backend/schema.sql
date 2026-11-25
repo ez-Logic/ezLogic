@@ -31,3 +31,23 @@ create table if not exists proof_nodes (
 
 alter table proof_nodes add column if not exists kind text;
 alter table proof_nodes add column if not exists proof_dependency_ids text[];
+
+create table if not exists users (
+  user_id           uuid primary key default gen_random_uuid(),
+  email             text not null unique,
+  password_hash     text not null,
+  email_verified_at timestamptz,
+  created_at        timestamptz not null default now()
+);
+
+-- Chats of signed-in users. Guest chats exist only as chat_turns rows.
+create table if not exists chats (
+  chat_id    uuid primary key,
+  user_id    uuid not null references users (user_id) on delete cascade,
+  title      text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists chats_user_idx
+  on chats (user_id, updated_at desc);

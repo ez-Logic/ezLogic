@@ -5,7 +5,9 @@ import type {
 	AgentDoneEvent,
 	AgentEvent,
 	AssistantMessage,
+	Chat,
 	ChatMessage,
+	ChatsResponse,
 	HistoryResponse,
 	HistoryTurn,
 	LeanToolResult,
@@ -14,6 +16,7 @@ import type {
 	ProofGraph,
 	StepKind,
 	ToolCall,
+	User,
 	UserMessage
 } from './types';
 
@@ -121,6 +124,52 @@ export function __resetSessionForTests(): void {
 }
 
 const graphCache = new Map<string, ProofGraph>();
+
+// ---------------------------------------------------------------------------
+// Accounts (email + password). Optional: without one, the guest session above
+// is used. The `ezlogic_user` cookie is HttpOnly, so `getMe` is how the UI
+// learns who is signed in.
+
+type AuthResponse = { user: User | null };
+
+let mockUser: User | null = null;
+
+/** Forget per-identity caches after the signed-in user changes. */
+function identityChanged(): void {
+	sessionPromise = null;
+	graphCache.clear();
+}
+
+async function authenticate(path: string, email: string, password: string): Promise<User> {
+	if (isMockMode) return (mockUser = { id: 'mock-user', email });
+	const data = await fetchJson<AuthResponse>(path, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ email, password })
+	});
+	if (!data.user) throw new ApiError('protocol', 'The server did not return a user');
+	identityChanged();
+	return data.user;
+}
+
+export const signup = (email: string, password: string) => authenticate('/api/auth/signup', email, password);
+export const login = (email: string, password: string) => authenticate('/api/auth/login', email, password);
+
+export async function logout(): Promise<void> {
+	if (isMockMode) {
+		mockUser = null;
+		return;
+	}
+	await fetchJson<void>('/api/auth/logout', { method: 'POST' });
+	identityChanged();
+}
+
+/** The signed-in user, or null for a guest. */
+export async function getMe(signal?: AbortSignal): Promise<User | null> {
+	if (isMockMode) return mockUser;
+	const data = await fetchJson<AuthResponse>('/api/auth/me', { signal });
+	return data.user ?? null;
+}
 
 /** Read the saved graph, or explicitly ask Lean to build a missing graph. */
 export async function getProofGraph(queryId: string, signal?: AbortSignal, build = false): Promise<ProofGraph | null> {
@@ -310,6 +359,19 @@ export async function* streamChat(
 		if (opts.signal?.aborted) throw new ApiError('aborted', 'Request aborted');
 		throw new ApiError('protocol', 'Stream ended without a final event');
 	}
+}
+
+/** The signed-in user's chats, most recently used first (empty for a guest). Messages
+ * aren't included; `getHistory` loads them when a chat is opened. */
+export async function listChats(signal?: AbortSignal): Promise<Chat[]> {
+	if (isMockMode) return [];
+	const data = await fetchJson<ChatsResponse>('/api/chats', { signal });
+	return data.chats.map((c) => ({
+		id: c.chat_id,
+		title: c.title,
+		messages: [],
+		updatedAt: Date.parse(c.updated_at)
+	}));
 }
 
 export async function getHistory(chatId: string, signal?: AbortSignal): Promise<ChatMessage[]> {

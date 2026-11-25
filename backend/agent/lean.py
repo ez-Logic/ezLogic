@@ -93,7 +93,9 @@ def _get_server():
                 # toolchain and Mathlib as check_file. lean-interact reads the Lean
                 # version from the project and rejects an explicit lean_version.
                 repl_config = LeanREPLConfig(
-                    project=LocalProject(directory=str(root), lake_path=Config.LAKE_PATH),
+                    project=LocalProject(
+                        directory=str(root), lake_path=Config.LAKE_PATH
+                    ),
                     cache_dir=Config.LEAN_INTERACT_CACHE,
                     lake_path=Config.LAKE_PATH,
                     **_repl_source(get_project_lean_version(root)),
@@ -105,9 +107,13 @@ def _get_server():
                     lake_path=Config.LAKE_PATH,
                     **_repl_source(Config.LEAN_VERSION),
                 )
-            log.info("starting lean-interact REPL (first use; building/downloading can take a while)")
+            log.info(
+                "starting lean-interact REPL (first use; building/downloading can take a while)"
+            )
             t0 = time.monotonic()
-            _server = AutoLeanServer(repl_config, max_total_memory=Config.LEAN_MAX_TOTAL_MEMORY)
+            _server = AutoLeanServer(
+                repl_config, max_total_memory=Config.LEAN_MAX_TOTAL_MEMORY
+            )
             log.info("lean-interact REPL ready in %.1fs", time.monotonic() - t0)
         return _server
 
@@ -123,7 +129,9 @@ def _get_base_env(server) -> int | None:
             from lean_interact import Command
             from lean_interact.interface import LeanError
 
-            log.info("loading Mathlib into the REPL (first snippet check; can take ~30-60s)")
+            log.info(
+                "loading Mathlib into the REPL (first snippet check; can take ~30-60s)"
+            )
             t0 = time.monotonic()
             response = server.run(
                 Command(cmd="import Mathlib\nimport Lean"),
@@ -131,9 +139,13 @@ def _get_base_env(server) -> int | None:
                 add_to_session_cache=True,
             )
             if isinstance(response, LeanError):
-                raise RuntimeError(f"Failed to load Mathlib into the REPL: {response.message}")
+                raise RuntimeError(
+                    f"Failed to load Mathlib into the REPL: {response.message}"
+                )
             _mathlib_env = response.env
-            log.info("Mathlib loaded in %.1fs (env=%s)", time.monotonic() - t0, _mathlib_env)
+            log.info(
+                "Mathlib loaded in %.1fs (env=%s)", time.monotonic() - t0, _mathlib_env
+            )
         return _mathlib_env
 
 
@@ -167,7 +179,8 @@ _SOURCE_TOKEN = re.compile(r'--[^\n]*|/-|"(?:\\.|[^"\\])*"', re.DOTALL)
 _COMMENT_DELIMITER = re.compile(r"/-|-/")
 _PROOF_DECLARATION = re.compile(
     r"^[ \t]*(?:@\[[^\]]*\]\s*|(?:public|private|protected|noncomputable)\s+)*"
-    r"(?:theorem|lemma|example)\s+", re.MULTILINE,
+    r"(?:theorem|lemma|example)\s+",
+    re.MULTILINE,
 )
 
 
@@ -176,7 +189,7 @@ def is_proof_candidate(code: str) -> bool:
     spans = []
     offset = 0
     while token := _SOURCE_TOKEN.search(code, offset):
-        spans.append(code[offset:token.start()])
+        spans.append(code[offset : token.start()])
         offset = token.end()
         if token.group() == "/-":
             depth = 1
@@ -187,7 +200,7 @@ def is_proof_candidate(code: str) -> bool:
                     break
             else:
                 offset = len(code)
-        spans.append(re.sub(r"[^\n]", " ", code[token.start():offset]))
+        spans.append(re.sub(r"[^\n]", " ", code[token.start() : offset]))
     spans.append(code[offset:])
     return bool(_PROOF_DECLARATION.search("".join(spans)))
 
@@ -204,7 +217,10 @@ def _unsupported_imports(code: str) -> list[str]:
     found: list[str] = []
     for match in _IMPORT_NAMES.finditer(stripped):
         for module in match.group(1).split():
-            if module.split(".")[0] not in _SUPPORTED_IMPORT_ROOTS and module not in found:
+            if (
+                module.split(".")[0] not in _SUPPORTED_IMPORT_ROOTS
+                and module not in found
+            ):
                 found.append(module)
     return found
 
@@ -226,17 +242,32 @@ def _run_in_repl_locked(code: str, label: str) -> LeanResult:
     t0 = time.monotonic()
     try:
         server = _get_server()
-        base_env = _get_base_env(server)  # may legitimately take ~30-60s on the very first call
+        base_env = _get_base_env(
+            server
+        )  # may legitimately take ~30-60s on the very first call
         body = _without_imports(code) if base_env is not None else code
         t_run = time.monotonic()
-        response = server.run(Command(cmd=body, env=base_env), timeout=Config.LEAN_TIMEOUT)
+        response = server.run(
+            Command(cmd=body, env=base_env), timeout=Config.LEAN_TIMEOUT
+        )
         run_elapsed = time.monotonic() - t_run
     except Exception as e:  # REPL build/startup failures, timeouts, ...
-        log.warning("%s failed after %.1fs: %s: %s", label, time.monotonic() - t0, type(e).__name__, e)
+        log.warning(
+            "%s failed after %.1fs: %s: %s",
+            label,
+            time.monotonic() - t0,
+            type(e).__name__,
+            e,
+        )
         return LeanResult(ok=False, error=f"{type(e).__name__}: {e}")
 
     if isinstance(response, LeanError):
-        log.info("%s rejected after %.1fs: %s", label, time.monotonic() - t0, response.message)
+        log.info(
+            "%s rejected after %.1fs: %s",
+            label,
+            time.monotonic() - t0,
+            response.message,
+        )
         return LeanResult(ok=False, error=response.message)
 
     messages = [
@@ -285,11 +316,17 @@ async def _check(code: str, label: str) -> LeanResult:
         # safety net for the rare case of the REPL/Mathlib build itself hanging,
         # which isn't covered by that inner timeout.
         result = await asyncio.wait_for(
-            asyncio.to_thread(_run_in_repl, code, label), timeout=Config.LEAN_STARTUP_TIMEOUT
+            asyncio.to_thread(_run_in_repl, code, label),
+            timeout=Config.LEAN_STARTUP_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        log.warning("%s exceeded the %.0fs safety timeout", label, Config.LEAN_STARTUP_TIMEOUT)
-        result = LeanResult(ok=False, error=f"Lean check timed out after {Config.LEAN_STARTUP_TIMEOUT:.0f}s")
+        log.warning(
+            "%s exceeded the %.0fs safety timeout", label, Config.LEAN_STARTUP_TIMEOUT
+        )
+        result = LeanResult(
+            ok=False,
+            error=f"Lean check timed out after {Config.LEAN_STARTUP_TIMEOUT:.0f}s",
+        )
     result.proof_candidate = is_proof_candidate(code)
     result.source_hash = source_hash(code)
     return result
@@ -326,7 +363,9 @@ async def warm_up() -> None:
     Lean check will simply try again (and report any error normally)."""
     if not shutil.which(Config.LAKE_PATH):
         return
+
     def start():
         with _operation_lock:
             _get_base_env(_get_server())
+
     await asyncio.to_thread(start)

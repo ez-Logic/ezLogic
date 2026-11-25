@@ -93,14 +93,48 @@ export function theoremView(graph: ProofGraph): ProofGraph | null {
 	});
 }
 
+/**
+ * Edges to draw: drop `A → C` when another visible path `A → … → C` already shows it.
+ * Uses only the nodes in `graph`, so a path through a hidden node never removes an edge.
+ * Cyclic graphs are left as they are, since removing edges there can disconnect nodes.
+ */
+export function reducedEdges(graph: ProofGraph) {
+	const ids = new Set(graph.nodes.map((n) => n.node_id));
+	const edges = graphEdges(graph).filter((e) => ids.has(e.target));
+	const succ = new Map<string, string[]>([...ids].map((id) => [id, []]));
+	for (const e of edges) succ.get(e.source)!.push(e.target);
+
+	// reach(id) is every node reachable from id, id excluded. 1 = visiting, which means a cycle.
+	const reach = new Map<string, Set<string>>();
+	const state = new Map<string, 1 | 2>();
+	const visit = (id: string): Set<string> | null => {
+		if (state.get(id) === 2) return reach.get(id)!;
+		if (state.get(id) === 1) return null;
+		state.set(id, 1);
+		const out = new Set<string>();
+		for (const next of succ.get(id)!) {
+			const sub = visit(next);
+			if (!sub) return null;
+			out.add(next);
+			for (const r of sub) out.add(r);
+		}
+		state.set(id, 2);
+		reach.set(id, out);
+		return out;
+	};
+	for (const id of ids) if (!visit(id)) return edges;
+
+	return edges.filter((e) =>
+		!succ.get(e.source)!.some((other) => other !== e.target && reach.get(other)!.has(e.target)));
+}
+
 export const NODE_WIDTH = 230;
 export const NODE_HEIGHT = 86;
 
 export function layoutGraph(graph: ProofGraph) {
 	const g = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
 	g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 75, marginx: 24, marginy: 24 });
-	const ids = new Set(graph.nodes.map((n) => n.node_id));
-	const edges = graphEdges(graph).filter((e) => ids.has(e.target));
+	const edges = reducedEdges(graph);
 	for (const n of [...graph.nodes].sort((a, b) => a.node_id.localeCompare(b.node_id))) {
 		g.setNode(n.node_id, { width: NODE_WIDTH, height: NODE_HEIGHT });
 	}

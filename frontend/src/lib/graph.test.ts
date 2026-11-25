@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { graphEdges, layoutGraph, parseProofGraph, theoremView, usedBy, visibleGraph } from './graph';
+import { graphEdges, layoutGraph, reducedEdges, parseProofGraph, theoremView, usedBy, visibleGraph } from './graph';
 import { mockGraph } from './mock';
 import { createGraphLoader, type GraphState } from './graph-loader';
 import type { ProofGraph } from './types';
@@ -48,6 +48,32 @@ describe('declaration graph', () => {
 		expect(graphEdges(overview).map((e) => [e.source, e.target])).toEqual([['main', 'helper'], ['helper', 'lemma']]);
 		expect(overview.nodes[2].depends_on_ids).toBeNull();
 		expect(graph.nodes).toHaveLength(6);
+	});
+
+	it('hides shortcut edges already implied by a longer visible path', () => {
+		const graph = parseProofGraph({ query_id: 'tr', root_node_id: 'A', nodes: [
+			{ node_id: 'A', depends_on_ids: ['B', 'C', 'D'] },
+			{ node_id: 'B', depends_on_ids: ['C'] },
+			{ node_id: 'C', depends_on_ids: ['D'] },
+			{ node_id: 'D', depends_on_ids: [] }
+		] }, 'tr');
+		const pairs = (es: { source: string; target: string }[]) => es.map((e) => [e.source, e.target]);
+		expect(pairs(reducedEdges(graph))).toEqual([['A', 'B'], ['B', 'C'], ['C', 'D']]);
+		expect(pairs(layoutGraph(graph).edges)).toEqual([['A', 'B'], ['B', 'C'], ['C', 'D']]);
+		// The canonical data and the full edge list keep every direct reference.
+		expect(graph.nodes[0].depends_on_ids).toEqual(['B', 'C', 'D']);
+		expect(graphEdges(graph)).toHaveLength(5);
+	});
+	it('keeps an edge whose only alternative path runs through a hidden node', () => {
+		const shown: ProofGraph = { query_id: 'tr', root_node_id: 'A', nodes: [
+			{ node_id: 'A', depends_on_ids: ['B', 'C'] },
+			{ node_id: 'C', depends_on_ids: [] }
+		] };
+		expect(reducedEdges(shown).map((e) => [e.source, e.target])).toEqual([['A', 'C']]);
+	});
+	it('leaves cyclic graphs unreduced', () => {
+		const graph = fixture('cycle');
+		expect(reducedEdges(graph)).toEqual(graphEdges(graph));
 	});
 
 	it('requires Lean metadata before projecting a legacy graph', () => {

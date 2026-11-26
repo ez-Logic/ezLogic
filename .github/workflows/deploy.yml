@@ -1,0 +1,110 @@
+# Manual Cloud Run deploys through deploy/cloudrun.sh, following its rules (deploy/README.md):
+# build -> candidate (no traffic) -> test it yourself -> promote. Nothing runs automatically:
+# each run is started from the Actions tab ("Run workflow"), and none of them uses the
+# all-traffic `deploy` command. One-time setup: deploy/README.md, "GitHub Actions".
+name: Deploy to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: >-
+          candidate: test, build this commit (~25 min) and deploy it with no traffic.
+          promote: send all traffic to the candidate.
+          rollback: all traffic back to the baseline, or to the revision below.
+        type: choice
+        options: [candidate, promote, rollback, revisions, pause, resume]
+        default: candidate
+      revision:
+        description: "Rollback only: revision to return to (blank: the baseline in deploy/baseline.env)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+# One change to the service at a time; a queued run waits instead of cancelling one in progress.
+concurrency:
+  group: cloud-run
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    if: inputs.action == 'candidate'
+    uses: ./.github/workflows/ci.yml
+
+  cloud-run:
+    name: cloudrun.sh ${{ inputs.action }}
+    needs: ci
+    # Runs after CI passed, or when CI was skipped (every action except candidate).
+    if: ${{ !cancelled() && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    # Holds the Google Cloud settings and the Anthropic key. Google only trusts jobs in this
+    # environment (deploy/cloudrun.sh github-setup).
+    environment: cloud-run
+    permissions:
+      contents: read
+      id-token: write # to sign in to Google Cloud without a stored key
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the Anthropic key is set
+        if: inputs.action == 'candidate'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+            echo "::error::Add the ANTHROPIC_API_KEY secret to the cloud-run environment (deploy/README.md)."
+            exit 1
+          fi
+
+      - uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build the image on Cloud Build
+        if: inputs.action == 'candidate'
+        run: deploy/cloudrun.sh build
+
+      - name: Deploy it as a candidate with no traffic
+        if: inputs.action == 'candidate'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: IMAGE_TAG="$(git rev-parse --short HEAD)" deploy/cloudrun.sh candidate
+
+      - name: Smoke test the candidate
+        if: inputs.action == 'candidate'
+        run: deploy/cloudrun.sh smoke
+
+      - name: Run cloudrun.sh ${{ inputs.action }}
+        if: inputs.action != 'candidate'
+        env:
+          ACTION: ${{ inputs.action }}
+          REVISION: ${{ inputs.revision }}
+        run: |
+          if [[ "$ACTION" == rollback ]]; then
+            deploy/cloudrun.sh rollback "$REVISION"
+          else
+            deploy/cloudrun.sh "$ACTION"
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "### cloudrun.sh ${{ inputs.action }}"
+            case "${{ inputs.action }}" in
+              candidate) echo "Try a proof at the candidate URL below (the first waits 3–10 min for Mathlib), then run **promote** or **rollback**." ;;
+              rollback)  echo "If that revision had no instance running, proofs wait 3–10 min while it loads Mathlib. The site itself works now." ;;
+            esac
+            echo '```'
+            deploy/cloudrun.sh revisions
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -11,11 +11,15 @@
 #
 # Iterating safely (deploy/README.md, "Iterating and rolling back"):
 #   deploy/cloudrun.sh candidate          # deploy the last build with NO traffic, at a test URL
+#   deploy/cloudrun.sh smoke              # check the candidate answers (/health and the site)
 #   deploy/cloudrun.sh promote            # send all traffic to the tested candidate
 #   deploy/cloudrun.sh rollback [REV]     # send all traffic back to the baseline (deploy/baseline.env)
 #   deploy/cloudrun.sh revisions          # list revisions: traffic, tags, image
 #   deploy/cloudrun.sh mark-baseline NAME # make the serving revision the new baseline
 #   deploy/cloudrun.sh backup NAME        # on-demand Cloud SQL backup
+#
+# GitHub Actions (.github/workflows/deploy.yml runs this script; deploy/README.md):
+#   deploy/cloudrun.sh github-setup       # once: let the repo's `cloud-run` environment deploy
 #
 # Every step is safe to re-run. Settings (override with environment variables):
 #   PROJECT_ID  (default: gcloud's current project)   REGION   (australia-southeast1)
@@ -23,6 +27,7 @@
 #   IMAGE_TAG   (latest; or a commit tag from `build`, or a baseline name)
 #   ANTHROPIC_API_KEY: taken from the environment, else backend/.env, else asked for. Only the
 #   key is copied to Cloud Run; the base URL is the backend's default (api.anthropic.com).
+#   GITHUB_REPO (ez-Logic/ezLogic): the repository `github-setup` trusts.
 set -euo pipefail
 # Never stop to ask (e.g. "enable this API?"): the script enables what it needs itself.
 export CLOUDSDK_CORE_DISABLE_PROMPTS=1
@@ -38,6 +43,7 @@ DB_NAME="${DB_NAME:-ezlogic}"
 DB_USER="${DB_USER:-ezlogic}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-haiku-5-5}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
+GITHUB_REPO="${GITHUB_REPO:-ez-Logic/ezLogic}"
 BASELINE_FILE=deploy/baseline.env
 
 if [[ -z "$PROJECT_ID" ]]; then
@@ -224,6 +230,21 @@ candidate() {
   echo "It loads Mathlib first (3-10 min). Test it, then: deploy/cloudrun.sh promote (or rollback)."
 }
 
+# A quick check that the candidate answers: the API's /health and the site's page. It doesn't
+# wait for Mathlib, so try a proof at the candidate URL yourself before promoting.
+smoke() {
+  local url
+  url="$(traffic_json | jq -r '[.status.traffic[]? | select(.tag == "candidate")][0].url // empty')"
+  [[ -n "$url" ]] || { echo "No candidate revision (deploy/cloudrun.sh candidate)." >&2; exit 1; }
+  say "Smoke test: ${url}"
+  retry curl -fsS --max-time 20 -o /dev/null "${url}/health"
+  if ! curl -fsS --max-time 20 "${url}/" | grep -qi '<html'; then
+    echo "The candidate's site did not return a page." >&2
+    exit 1
+  fi
+  echo "The candidate answers at ${url}. Try a proof there (the first waits for Mathlib), then promote."
+}
+
 promote() {
   local rev
   rev="$(tagged_revision candidate)"
@@ -286,6 +307,57 @@ mark_baseline() {
   echo "Recorded in ${BASELINE_FILE}. Commit it, then: git push origin ${name}"
 }
 
+# Let .github/workflows/deploy.yml run this script without a stored Google key. GitHub's
+# sign-in token for a job is exchanged for a short-lived token of a deploy service account
+# (Workload Identity Federation). Only jobs in GITHUB_REPO's `cloud-run` environment can
+# use it, so pull requests and other workflows can't deploy.
+github_setup() {
+  local sa_name=github-deploy pool_id=github provider_id=ezlogic
+  local sa="${sa_name}@${PROJECT_ID}.iam.gserviceaccount.com"
+  local pool="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${pool_id}"
+  say "GitHub Actions deploys from ${GITHUB_REPO} (environment cloud-run)"
+  gcloud services enable iamcredentials.googleapis.com sts.googleapis.com --project "$PROJECT_ID"
+
+  say "Deploy service account ${sa}"
+  gcloud iam service-accounts describe "$sa" >/dev/null 2>&1 ||
+    gcloud iam service-accounts create "$sa_name" --display-name "GitHub Actions deploys"
+  # Build on Cloud Build (streaming its logs needs viewer), tag images, create revisions and
+  # move traffic. A new service account can take a few seconds to be usable, hence retry.
+  for role in roles/run.admin roles/cloudbuild.builds.editor roles/artifactregistry.writer \
+      roles/storage.admin roles/viewer roles/serviceusage.serviceUsageConsumer; do
+    retry gcloud projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:${sa}" \
+      --role "$role" --condition None --quiet >/dev/null
+  done
+  # Builds and revisions run as the default compute service account.
+  gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --member "serviceAccount:${sa}" \
+    --role roles/iam.serviceAccountUser --quiet >/dev/null
+
+  say "Workload identity pool ${pool_id}, provider ${provider_id}"
+  gcloud iam workload-identity-pools describe "$pool_id" --location global >/dev/null 2>&1 ||
+    gcloud iam workload-identity-pools create "$pool_id" --location global \
+      --display-name "GitHub Actions"
+  gcloud iam workload-identity-pools providers describe "$provider_id" --location global \
+      --workload-identity-pool "$pool_id" >/dev/null 2>&1 ||
+    gcloud iam workload-identity-pools providers create-oidc "$provider_id" --location global \
+      --workload-identity-pool "$pool_id" --display-name "GitHub ${GITHUB_REPO}" \
+      --issuer-uri https://token.actions.githubusercontent.com \
+      --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository" \
+      --attribute-condition "assertion.repository == '${GITHUB_REPO}'"
+  gcloud iam service-accounts add-iam-policy-binding "$sa" --role roles/iam.workloadIdentityUser \
+    --member "principal://iam.googleapis.com/${pool}/subject/repo:${GITHUB_REPO}:environment:cloud-run" \
+    --quiet >/dev/null
+
+  cat <<EOF
+
+Done. In GitHub: Settings > Environments > New environment "cloud-run". Then add:
+  Variables  GCP_PROJECT_ID                  ${PROJECT_ID}
+             GCP_WORKLOAD_IDENTITY_PROVIDER  ${pool}/providers/${provider_id}
+             GCP_SERVICE_ACCOUNT             ${sa}
+  Secret     ANTHROPIC_API_KEY               (the key in backend/.env)
+Under "Deployment branches and tags", allow only main. Permissions can take a few minutes to apply.
+EOF
+}
+
 case "${1:-}" in
   setup) setup ;;
   build) build ;;
@@ -300,10 +372,12 @@ case "${1:-}" in
     gcloud run services update "$SERVICE" --region "$REGION" --min-instances 1 --no-cpu-throttling --quiet
     serve_revision "$(latest_revision)" ;;
   candidate) candidate ;;
+  smoke) smoke ;;
   promote) promote ;;
   rollback) rollback "${2:-}" ;;
   revisions) revisions ;;
   mark-baseline) mark_baseline "${2:-}" ;;
   backup) backup "${2:-}" ;;
-  *) sed -n '2,24p' "$0"; exit 1 ;;
+  github-setup) github_setup ;;
+  *) sed -n '2,30p' "$0"; exit 1 ;;
 esac

@@ -29,6 +29,8 @@ One service in `australia-southeast1` serves the built site and `/api` from one 
 - Postgres is Cloud SQL `ezlogic-db`.
 
 Everything goes through `deploy/cloudrun.sh`; details are in `deploy/README.md`.
+`.github/workflows/deploy.yml` runs the same script from GitHub, only when started by hand, and
+`ci.yml` runs the backend and frontend tests on every pull request.
 
 ### Rules for changing the live demo
 - **Never deploy straight to visitors.** Use `build` → `candidate` (no traffic, at

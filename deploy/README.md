@@ -140,6 +140,47 @@ How it works:
   `deploy/cloudrun.sh backup <name>`. Rolling such a change back then also means restoring that
   backup.
 
+## GitHub Actions
+Two workflows live in `.github/workflows/`:
+
+- **`ci.yml` (automatic)** runs on every pull request and every push to `main`:
+  - backend: `pytest`, including the database tests against a throwaway Postgres 16. The
+    real-Lean tests stay skipped, since they need Mathlib;
+  - frontend: `npm run check`, `npm test` and `npm run build`.
+
+  It needs no secrets.
+- **`deploy.yml` (manual)** runs this script from the Actions tab: **Deploy to Cloud Run → Run
+  workflow** on `main`, then pick an action. Code is tested by CI in its pull request, merged, and
+  then tried as a candidate before visitors see it.
+
+  | Action | What it does |
+  | --- | --- |
+  | `candidate` | Runs CI, then `build` (~25 min), `candidate` with that commit's image, and `smoke` (checks `/health` and the page answer). Ends with the candidate URL. |
+  | `promote` | Sends all traffic to the candidate. |
+  | `rollback` | All traffic back to the baseline in `deploy/baseline.env`, or to the revision you type. |
+  | `revisions`, `pause`, `resume` | As on the command line. |
+
+  It never runs `deploy` (all traffic at once), and nothing deploys on its own. Between
+  `candidate` and `promote`, try a proof at the candidate URL yourself: `smoke` doesn't wait for
+  Mathlib. `mark-baseline` stays on the command line, since it commits and pushes a git tag.
+
+**One-time setup** (someone with Owner on the Google Cloud project):
+1. Run `deploy/cloudrun.sh github-setup`. It creates:
+   - a `github-deploy` service account that can build, deploy revisions and move traffic;
+   - a Workload Identity pool that lets GitHub sign in as that account without a stored key, only
+     from jobs in this repository's `cloud-run` environment.
+
+   It prints the values for step 2.
+2. In GitHub, go to **Settings → Environments → New environment** and name it `cloud-run`.
+   - **Variables:** add `GCP_PROJECT_ID`, `GCP_WORKLOAD_IDENTITY_PROVIDER` and
+     `GCP_SERVICE_ACCOUNT`, using the values step 1 printed.
+   - **Secret:** add `ANTHROPIC_API_KEY`. Every candidate copies it to the service, as the script
+     does locally.
+   - **Deployment branches and tags:** allow only `main`.
+   - **Optional:** add required reviewers, so every deploy waits for an approval.
+3. Optional: in **Settings → Branches**, protect `main` and require the **Backend tests** and
+   **Frontend checks** checks to pass before merging.
+
 ## Pitch day
 1. `deploy/cloudrun.sh resume`, if you paused it, at least 10 minutes before you start. A new
    instance needs a few minutes to load Mathlib the first time.

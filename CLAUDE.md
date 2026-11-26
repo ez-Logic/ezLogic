@@ -30,7 +30,7 @@ One service in `australia-southeast1` serves the built site and `/api` from one 
 
 Everything goes through `deploy/cloudrun.sh`; details are in `deploy/README.md`.
 `.github/workflows/deploy.yml` runs the same script from GitHub, only when started by hand, and
-`ci.yml` runs the backend and frontend tests on every pull request.
+`ci.yml` runs the backend and frontend tests on every push to any branch.
 
 ### Rules for changing the live demo
 - **Never deploy straight to visitors.** Use `build` → `candidate` (no traffic, at

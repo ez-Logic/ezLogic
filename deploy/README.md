@@ -143,14 +143,15 @@ How it works:
 ## GitHub Actions
 Two workflows live in `.github/workflows/`:
 
-- **`ci.yml` (automatic)** runs on every pull request and every push to `main`:
+- **`ci.yml` (automatic)** runs on every push to any branch. A pull request shows the result for
+  its latest commit:
   - backend: `pytest`, including the database tests against a throwaway Postgres 16. The
     real-Lean tests stay skipped, since they need Mathlib;
   - frontend: `npm run check`, `npm test` and `npm run build`.
 
   It needs no secrets.
 - **`deploy.yml` (manual)** runs this script from the Actions tab: **Deploy to Cloud Run → Run
-  workflow** on `main`, then pick an action. Code is tested by CI in its pull request, merged, and
+  workflow** on `main`, then pick an action. Code is tested by CI on its branch, merged, and
   then tried as a candidate before visitors see it.
 
   | Action | What it does |

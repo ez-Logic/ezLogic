@@ -1,18 +1,18 @@
-# Checks every pull request and every push to main. Also called by deploy.yml before a
-# candidate is built, so nothing reaches Cloud Run without passing these first.
+# Checks every push to any branch; a pull request shows the result for its latest commit.
+# Also called by deploy.yml before a candidate is built, so nothing reaches Cloud Run
+# without passing these first.
 name: CI
 
 on:
-  pull_request:
   push:
-    branches: [main]
+    branches: ["**"] # every branch (pushing a tag doesn't run it)
   workflow_dispatch:
   workflow_call:
 
 permissions:
   contents: read
 
-# A newer push to the same branch or PR replaces a run that is still going.
+# A newer push to the same branch replaces a run that is still going.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true

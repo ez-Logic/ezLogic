@@ -104,7 +104,7 @@ the steps, costs, pitch-day checklist and clean-up.
 - **Postgres** is Cloud SQL.
 - **Deploying:** `deploy/cloudrun.sh all` once. After code changes, run `build`, then `candidate`
   (a no-traffic test URL), then `promote`. Around the pitch, use `pause` / `resume`.
-- **GitHub Actions.** `ci.yml` tests every pull request and push to `main`. `deploy.yml` runs the
+- **GitHub Actions.** `ci.yml` tests every push to any branch. `deploy.yml` runs the
   same `candidate` / `promote` / `rollback` steps from the Actions tab, by hand. See
   [`deploy/README.md`](deploy/README.md#github-actions) for the one-time setup.
 - **Rolling back.** The working demo is frozen as `demo-baseline-2` (git tag, image tag, Cloud

@@ -5,7 +5,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getMe, login, logout, signup } from '#lib/api.js';
+	import { apiBase, getMe, isDesktop, login, logout, signup } from '#lib/api.js';
+	import { openServerSettings } from '#lib/server-settings.svelte.js';
 	import type { User } from '#lib/types.js';
 
 	let mode = $state<'login' | 'signup'>('login');
@@ -111,6 +112,14 @@
 				</button>
 			</p>
 			<p class="mt-2 text-sm"><a href="/" class="text-muted underline">Continue as guest</a></p>
+		{/if}
+		{#if isDesktop()}
+			<p class="mt-4 border-t border-line pt-3 text-xs text-muted">
+				Server: <span class="font-mono">{apiBase()}</span>
+				<button type="button" onclick={openServerSettings} class="ml-1 underline underline-offset-2 hover:text-ink">
+					Change
+				</button>
+			</p>
 		{/if}
 	</div>
 </main>

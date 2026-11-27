@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Chat, User } from '#lib/types.js';
 	import ThemeToggle from './ThemeToggle.svelte';
+	import { isDesktop } from '#lib/api.js';
+	import { openServerSettings } from '#lib/server-settings.svelte.js';
 
 	let {
 		chats,
@@ -122,5 +124,15 @@
 	</div>
 	<div class="flex items-center border-t border-line px-4 py-3">
 		<ThemeToggle />
+		{#if isDesktop()}
+			<button
+				type="button"
+				onclick={openServerSettings}
+				class="ml-auto text-sm text-muted underline underline-offset-2 hover:text-ink"
+				title="Choose the ezLogic backend this app connects to"
+			>
+				Server
+			</button>
+		{/if}
 	</div>
 </aside>

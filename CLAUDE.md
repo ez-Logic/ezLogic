@@ -11,6 +11,10 @@ lean-interact REPL (`backend/`). Storage: Postgres. See `README.md` and `backend
   - `npm test` (vitest)
   - `npm run check` (svelte-check)
   - `npm run build` (adapter-static output in `frontend/build/`)
+  - `npm run desktop:dev` / `desktop:build` (Tauri 2 desktop app in `frontend/src-tauri/`; needs
+    Rust). On desktop, `api.ts` routes requests through `@tauri-apps/plugin-http`. The server URL
+    comes from the in-app Server setting, then `VITE_API_URL`, then `http://localhost:8000`.
+    See `frontend/README.md`.
 - **Backend dependencies live only in `backend/.venv`.** Run things as:
   - `cd backend && .venv/bin/python main.py` (port 8000, auto-reload)
   - `.venv/bin/python -m pytest tests` (plain `pytest` can't import `agent`)

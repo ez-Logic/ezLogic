@@ -10,6 +10,7 @@
 		finalizeLive,
 		getHistory,
 		getMe,
+		isDesktop,
 		isMockMode,
 		listChats,
 		logout,
@@ -17,6 +18,7 @@
 		streamChat
 	} from '#lib/api.js';
 	import { toolLabel } from '#lib/format.js';
+	import { openServerSettings } from '#lib/server-settings.svelte.js';
 	import { demoChats } from '#lib/mock.js';
 	import { composePrompt, extractProofText, FileError } from '#lib/extract.js';
 	import type { AssistantMessage, Chat, User, VerificationStatus } from '#lib/types.js';
@@ -472,6 +474,11 @@
 				transition:fade={{ duration: 120 }}
 			>
 				<span class="flex-1">Can't reach the server: {sessionError}</span>
+				{#if isDesktop()}
+					<button type="button" onclick={openServerSettings} class="font-medium underline underline-offset-2">
+						Change server
+					</button>
+				{/if}
 				<button type="button" onclick={retrySession} class="font-medium underline underline-offset-2">
 					Retry
 				</button>

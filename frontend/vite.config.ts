@@ -21,7 +21,11 @@ export default defineConfig({
 			adapter: adapter({ fallback: 'index.html' })
 		})
 	],
+	// Tauri (`npm run desktop:dev`) loads the dev server at a fixed URL and prints
+	// its own output, so keep the port fixed and the terminal uncleared.
+	clearScreen: false,
 	server: {
+		strictPort: true,
 		proxy: {
 			// Same-origin `/api` calls so the guest session cookie works without
 			// CORS/SameSite issues, and SSE streaming passes straight through.

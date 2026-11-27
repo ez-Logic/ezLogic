@@ -55,6 +55,38 @@ npm run preview       # serve the production build locally
 `adapter-auto` is used for now; pick a real adapter before deploying (see
 [the SvelteKit docs](https://svelte.dev/docs/kit/adapters)).
 
+## Desktop app (Tauri)
+
+The same frontend is packaged as a desktop app with [Tauri 2](https://v2.tauri.app) (`src-tauri/`).
+It bundles the built site and connects to an ezLogic backend running elsewhere.
+
+**Prerequisites:** a Rust toolchain. On Linux you also need the WebKitGTK 4.1 and libsoup3
+development packages. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
+
+```sh
+npm run desktop:dev     # opens the app window on the Vite dev server (port 5173, hot reload)
+npm run desktop:build   # release bundles in src-tauri/target/release/bundle/ (.deb, AppImage, ...)
+VITE_MOCK=1 npm run desktop:dev   # UI only, no backend needed
+```
+
+**Which backend it uses:**
+- If a URL has been saved from the **Server** button (bottom of the sidebar, or "Change server" on
+  the connection-error banner), it uses that. The URL is stored in the app's localStorage.
+- Otherwise it uses `VITE_API_URL` from build time.
+- Otherwise it uses `http://localhost:8000`.
+
+The Server dialog's **Test** button calls the backend's `GET /health`.
+
+**How requests work:** in the app, `src/lib/api.ts` sends backend calls through
+`@tauri-apps/plugin-http` instead of the webview's `fetch`. The plugin is a Rust-side HTTP
+client with its own cookie jar. Because the page runs on `tauri://localhost`, the webview would hit
+CORS and cross-site cookie rules, and the plugin avoids both. So the backend's HttpOnly session
+cookies and the SSE chat stream work with no backend changes.
+
+The jar is saved to a `.cookies` file in the app's data directory on exit, so sign-ins survive a
+restart. `src-tauri/capabilities/default.json` lists the URLs the plugin may call. The list is broad
+on purpose, since the server URL can be changed at runtime.
+
 ## Declaration dependency graph
 
 Each completed response has a **View dependency graph** button. It opens a graph

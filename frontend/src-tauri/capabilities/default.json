@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permissions for the main window. The HTTP scope is broad because the backend URL can be changed at runtime from the app's Server URL setting.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "http://localhost:*" },
+        { "url": "http://127.0.0.1:*" },
+        { "url": "http://*" },
+        { "url": "http://*:*" },
+        { "url": "https://*" }
+      ]
+    }
+  ]
+}

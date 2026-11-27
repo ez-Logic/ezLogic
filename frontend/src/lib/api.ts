@@ -20,16 +20,83 @@ import type {
 	UserMessage
 } from './types';
 
-/**
- * Backend base URL. Requests go to `${API_URL}/api/...`. Defaults to '' (same
- * origin), relying on the dev server's `/api` proxy (see vite.config.ts) or a
- * reverse proxy in production. Set `VITE_API_URL` only to point at a backend
- * on a different origin.
- */
-const API_URL: string = import.meta.env.VITE_API_URL ?? '';
+// ---------------------------------------------------------------------------
+// Backend location and transport
+//
+// In a browser, requests go to `${VITE_API_URL}/api/...`. That defaults to ''
+// (same origin), relying on the dev server's `/api` proxy (see vite.config.ts)
+// or the backend serving the site itself in production.
+//
+// In the Tauri desktop app the page runs on its own origin (tauri://localhost),
+// so the browser's fetch would hit CORS and cross-site cookie limits. There,
+// requests go through @tauri-apps/plugin-http instead: a Rust-side fetch with
+// its own persistent cookie jar, which keeps the HttpOnly session cookies
+// working unchanged. The server URL can be changed at runtime (Server URL
+// setting) and is remembered in localStorage.
 
 /** Set `VITE_MOCK=1` to use the built-in demo proof instead of the backend. */
 export const isMockMode = import.meta.env.VITE_MOCK === '1';
+
+const SERVER_URL_KEY = 'ezlogic.serverUrl';
+
+/** True inside the Tauri desktop app (Tauri sets `globalThis.isTauri`). */
+export const isDesktop = (): boolean => Boolean((globalThis as { isTauri?: boolean }).isTauri);
+
+const stripSlash = (url: string) => url.trim().replace(/\/+$/, '');
+
+/** The desktop app's server URL when nothing is saved: `VITE_API_URL`, else a local backend. */
+export const defaultServerUrl = (): string =>
+	stripSlash(import.meta.env.VITE_API_URL || 'http://localhost:8000');
+
+/** The server URL saved from the desktop app's settings, if any. */
+export function getSavedServerUrl(): string | null {
+	try {
+		return globalThis.localStorage?.getItem(SERVER_URL_KEY) || null;
+	} catch {
+		return null;
+	}
+}
+
+/** Save (or with `null`, forget) the desktop app's server URL. */
+export function setServerUrl(url: string | null): void {
+	const value = url ? stripSlash(url) : '';
+	if (value) globalThis.localStorage?.setItem(SERVER_URL_KEY, value);
+	else globalThis.localStorage?.removeItem(SERVER_URL_KEY);
+	identityChanged(); // a different server means a different session and graphs
+}
+
+/** Base URL that `/api/...` paths are appended to. */
+export function apiBase(): string {
+	if (isDesktop()) return stripSlash(getSavedServerUrl() ?? defaultServerUrl());
+	return stripSlash(import.meta.env.VITE_API_URL ?? '');
+}
+
+let tauriFetch: typeof fetch | null = null;
+
+/** `fetch` for backend calls: the Tauri HTTP plugin on desktop, the browser's otherwise. */
+async function apiFetch(path: string, init: RequestInit, base = apiBase()): Promise<Response> {
+	const url = `${base}${path}`;
+	if (!isDesktop()) return fetch(url, { ...init, credentials: 'include' });
+	// Loaded lazily so the plugin stays out of the web bundle and the tests.
+	tauriFetch ??= (await import('@tauri-apps/plugin-http')).fetch as typeof fetch;
+	return tauriFetch(url, init);
+}
+
+/** Check that an ezLogic backend answers at `url` (its `GET /health`). Throws `ApiError` if not. */
+export async function checkServer(url: string, signal?: AbortSignal): Promise<void> {
+	let res: Response;
+	try {
+		res = await apiFetch('/health', { signal }, stripSlash(url));
+	} catch (e) {
+		if (signal?.aborted) throw new ApiError('aborted', 'Request aborted');
+		throw new ApiError('network', e instanceof Error ? e.message : String(e));
+	}
+	if (!res.ok) throw new ApiError('http', `The server answered ${res.status}`, res.status);
+	const body = (await res.json().catch(() => null)) as { service?: unknown } | null;
+	if (!body || typeof body.service !== 'string' || !body.service.includes('ezLogic')) {
+		throw new ApiError('protocol', "That server doesn't look like an ezLogic backend");
+	}
+}
 
 let counter = 0;
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(counter++).toString(36)}`;
@@ -81,7 +148,7 @@ export function describeErrorBody(body: unknown, status: number): string {
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 	let res: Response;
 	try {
-		res = await fetch(`${API_URL}${path}`, { ...init, credentials: 'include' });
+		res = await apiFetch(path, init ?? {});
 	} catch (e) {
 		if (init?.signal?.aborted) throw new ApiError('aborted', 'Request aborted');
 		throw new ApiError('network', e instanceof Error ? e.message : String(e));
@@ -299,9 +366,8 @@ export async function* streamChat(
 
 	let res: Response;
 	try {
-		res = await fetch(`${API_URL}/api/chat`, {
+		res = await apiFetch('/api/chat', {
 			method: 'POST',
-			credentials: 'include',
 			headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
 			signal: opts.signal,
 			body: JSON.stringify({

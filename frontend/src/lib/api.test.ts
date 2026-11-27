@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	ApiError,
 	__resetSessionForTests,
+	apiBase,
+	defaultServerUrl,
+	getSavedServerUrl,
+	setServerUrl,
 	applyEvent,
 	createSSEParser,
 	deriveStatus,
@@ -962,5 +966,52 @@ describe('accounts', () => {
 		await login('a@b.co', 'password1');
 		await ensureSession();
 		expect(fetcher.mock.calls.map((c) => c[0])).toEqual(['/api/session', '/api/auth/login', '/api/session']);
+	});
+});
+
+describe('server URL (desktop app)', () => {
+	function fakeStorage() {
+		const data = new Map<string, string>();
+		return {
+			getItem: (k: string) => data.get(k) ?? null,
+			setItem: (k: string, v: string) => void data.set(k, v),
+			removeItem: (k: string) => void data.delete(k)
+		};
+	}
+
+	beforeEach(() => {
+		vi.stubGlobal('localStorage', fakeStorage());
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.unstubAllEnvs();
+	});
+
+	it('uses same-origin paths in a browser, ignoring a saved desktop URL', () => {
+		setServerUrl('http://example.test:9000');
+		expect(apiBase()).toBe('');
+	});
+
+	it('honours VITE_API_URL in a browser', () => {
+		vi.stubEnv('VITE_API_URL', 'https://api.example.test/');
+		expect(apiBase()).toBe('https://api.example.test');
+	});
+
+	it('defaults to a local backend on desktop', () => {
+		vi.stubGlobal('isTauri', true);
+		vi.stubEnv('VITE_API_URL', '');
+		expect(defaultServerUrl()).toBe('http://localhost:8000');
+		expect(apiBase()).toBe('http://localhost:8000');
+	});
+
+	it('prefers the saved URL on desktop, and falls back once it is cleared', () => {
+		vi.stubGlobal('isTauri', true);
+		vi.stubEnv('VITE_API_URL', 'https://built-in.example.test');
+		setServerUrl(' http://10.0.0.5:8000// ');
+		expect(getSavedServerUrl()).toBe('http://10.0.0.5:8000');
+		expect(apiBase()).toBe('http://10.0.0.5:8000');
+		setServerUrl(null);
+		expect(getSavedServerUrl()).toBeNull();
+		expect(apiBase()).toBe('https://built-in.example.test');
 	});
 });
